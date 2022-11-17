@@ -26,10 +26,8 @@ namespace services
         private static readonly ConcurrentDictionary<string, int> ServiceIdToRowMap = new();
 
 
-        public MainView()
+        public MainView(Toplevel top)
         {
-            Width = Dim.Fill(0);
-            Height = Dim.Fill(0);
             GreenOnBlack = new ColorScheme
             {
                 Normal = new Terminal.Gui.Attribute(Color.Green, Color.Black),
@@ -52,10 +50,10 @@ namespace services
 
             StatusBar = new StatusBar()
             {
-                Y = Pos.Bottom(this),
+                Y = Pos.Bottom(top),
                 Width = Dim.Percent(100)
             };
-            Add(StatusBar);
+            top.Add(StatusBar);
             SearchLabel = new Label()
             {
                 Y = 0,
@@ -206,11 +204,6 @@ namespace services
             {
                 RunWithService(service, util =>
                 {
-                    if (util.State is ServiceState.Stopped)
-                    {
-                        return;
-                    }
-
                     DoRestart(util);
                 });
             }
@@ -323,7 +316,8 @@ namespace services
         private static void RefreshServiceStateUntilReached(
             MainView mainView,
             string serviceName,
-            ServiceState expected
+            ServiceState expected,
+            bool isFinalState = true
         )
         {
             mainView.ResetStatusBar();
@@ -333,6 +327,7 @@ namespace services
             {
                 if (current == expected)
                 {
+                    UpdateServiceStateInList(mainView, serviceName, isIntermediate: !isFinalState, current);
                     if (FindSelectedServiceName(mainView) == serviceName)
                     {
                         Application.MainLoop.Invoke(() =>
@@ -345,7 +340,7 @@ namespace services
                     return;
                 }
 
-                current = RefreshServiceStatus(mainView, serviceName);
+                current = RefreshServiceStatus(mainView, serviceName, polling: true);
                 Thread.Sleep(AUTO_REFRESH_INTERVAL_MS);
             }
             // TODO: get sad?
@@ -353,7 +348,8 @@ namespace services
 
         private static ServiceState RefreshServiceStatus(
             MainView mainView,
-            string serviceName
+            string serviceName,
+            bool polling
         )
         {
             var util = ServiceUtilFor(serviceName);
@@ -362,22 +358,33 @@ namespace services
                 return ServiceState.Unknown;
             }
 
+            var state = util.State;
             if (ServiceIdToRowMap.TryGetValue(serviceName, out var r))
             {
-                mainView.AllServices.Rows[r][STATE_COLUMN] = $"{util.State}";
+                mainView.AllServices.Rows[r][STATE_COLUMN] = $"{state}";
             }
 
 
+            return UpdateServiceStateInList(mainView, serviceName, polling, state);
+        }
+
+        private static ServiceState UpdateServiceStateInList(
+            MainView mainView,
+            string serviceName,
+            bool isIntermediate,
+            ServiceState state
+        )
+        {
             if (!FilteredServiceIdToRowMap.TryGetValue(serviceName, out var row))
             {
-                return util.State;
+                return state;
             }
 
             lock (mainView.FilteredServices)
             {
                 if (mainView.FilteredServices.Rows.Count <= row)
                 {
-                    return util.State;
+                    return state;
                 }
             }
 
@@ -386,10 +393,13 @@ namespace services
                 try
                 {
                     mainView.ServicesList.SetNeedsDisplay();
-                    Trace.WriteLine($"Update status: {row} {util.ServiceName} {util.State}");
+                    var stringState = isIntermediate
+                        ? $"{state}*"
+                        : $"{state}";
+                    Trace.WriteLine($"Update status: {row} {serviceName} {state}");
                     lock (mainView.FilteredServices)
                     {
-                        mainView.FilteredServices.Rows[row][STATE_COLUMN] = $"{util.State}";
+                        mainView.FilteredServices.Rows[row][STATE_COLUMN] = stringState;
                     }
 
                     mainView.StatusBar.SetNeedsDisplay();
@@ -401,7 +411,7 @@ namespace services
                 }
             });
 
-            return util.State;
+            return state;
         }
 
 
@@ -529,17 +539,23 @@ namespace services
 
         private void DoRestart(IWindowsServiceUtil svc)
         {
-            svc.Stop(wait: false);
-            RefreshServiceStateUntilReached(
-                this,
-                svc.ServiceName,
-                ServiceState.Stopped
-            );
+            if (svc.State != ServiceState.Stopped)
+            {
+                svc.Stop(wait: false);
+                RefreshServiceStateUntilReached(
+                    this,
+                    svc.ServiceName,
+                    ServiceState.Stopped,
+                    isFinalState: false
+                );
+            }
+
             svc.Start(wait: false);
             RefreshServiceStateUntilReached(
                 this,
                 svc.ServiceName,
-                ServiceState.Running
+                ServiceState.Running,
+                isFinalState: true
             );
         }
 
