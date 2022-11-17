@@ -1,4 +1,4 @@
-services
+TSM - Terminal Services Manager
 ---
 
 A console-based service manager for windows

@@ -1,12 +1,12 @@
 {
-  "name": "services",
+  "name": "tsm",
   "version": "1.0.0",
-  "description": "services\r ---",
+  "description": "Terminal Services Manager for Windows",
   "main": "index.js",
   "scripts": {
-    "build": "dotnet build src/services.sln",
-    "publish": "dotnet publish src/services/services.csproj --configuration Release --framework net6.0 --self-contained True --output Publish --runtime win-x64 --verbosity Normal /property:PublishTrimmed=True /property:PublishSingleFile=True /property:IncludeNativeLibrariesForSelfExtract=True /property:DebugType=None /property:DebugSymbols=False /property:EnableCompressionInSingleFile=True /property:TrimMode=copyused",
-    "start": "dotnet run --project src/services/services.csproj"
+    "build": "dotnet build src/tsm.sln",
+    "publish": "dotnet publish src/tsm/tsm.csproj --configuration Release --framework net6.0 --self-contained True --output Publish --runtime win-x64 --verbosity Normal /property:PublishTrimmed=True /property:PublishSingleFile=True /property:IncludeNativeLibrariesForSelfExtract=True /property:DebugType=None /property:DebugSymbols=False /property:EnableCompressionInSingleFile=True /property:TrimMode=copyused",
+    "start": "dotnet run --project src/tsm/tsm.csproj"
 
   },
   "keywords": [],

@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "services", "services\services.csproj", "{14D8FD9F-7E8E-4A63-B43D-31E63C1E3D0E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "tsm", "tsm\tsm.csproj", "{14D8FD9F-7E8E-4A63-B43D-31E63C1E3D0E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
