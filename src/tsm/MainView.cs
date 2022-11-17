@@ -120,7 +120,8 @@ namespace services
                         var row = AllServices.Rows[i];
                         var serviceId = ServiceIdFor(row);
                         var serviceName = ServiceNameFor(row);
-                        var stringData = $"{serviceId} {serviceName}";
+                        var serviceState = ServiceStateFor(row);
+                        var stringData = $"{serviceId} {serviceName} {serviceState}";
                         ServiceIdToRowMap[serviceId] = i;
                         if (search.Length == 0 ||
                             search.All(s => stringData.Contains(s, StringComparison.OrdinalIgnoreCase)))
@@ -202,10 +203,7 @@ namespace services
             var services = CurrentlyFilteredServices();
             foreach (var service in services)
             {
-                RunWithService(service, util =>
-                {
-                    DoRestart(util);
-                });
+                RunWithService(service, DoRestart);
             }
         }
 
@@ -325,31 +323,45 @@ namespace services
             // Don't poll forever, just in case
             for (var i = 0; i < 120; i++)
             {
+                Trace.WriteLine($"refresh '{serviceName}' until '{expected}' (current: '{current}')");
                 if (current == expected)
                 {
-                    UpdateServiceStateInList(mainView, serviceName, isIntermediate: !isFinalState, current);
-                    if (FindSelectedServiceName(mainView) == serviceName)
-                    {
-                        Application.MainLoop.Invoke(() =>
-                        {
-                            mainView.StatusBar.SetNeedsDisplay();
-                            UpdateStatusBarForSelectedService(mainView, serviceName);
-                        });
-                    }
-
+                    UpdateServiceStateInList(mainView, serviceName, isIntermediateRefresh: !isFinalState, current);
+                    DoFinalUpdate();
                     return;
                 }
 
-                current = RefreshServiceStatus(mainView, serviceName, polling: true);
+                current = RefreshServiceStatus(mainView, serviceName, isIntermediateRefresh: true);
                 Thread.Sleep(AUTO_REFRESH_INTERVAL_MS);
             }
+
+            RefreshServiceStatus(mainView, serviceName, isIntermediateRefresh: false);
+            Application.MainLoop.Invoke(() =>
+            {
+                MessageBox.ErrorQuery(
+                    "Unable to change service state",
+                    $"Service [{serviceName}] did not respond to the request",
+                    defaultButton: 0,
+                    "Ok"
+                );
+            });
+            DoFinalUpdate();
+
             // TODO: get sad?
+            void DoFinalUpdate()
+            {
+                Application.MainLoop.Invoke(() =>
+                {
+                    mainView.StatusBar.SetNeedsDisplay();
+                    UpdateStatusBarForSelectedService(mainView, serviceName);
+                });
+            }
         }
 
         private static ServiceState RefreshServiceStatus(
             MainView mainView,
             string serviceName,
-            bool polling
+            bool isIntermediateRefresh
         )
         {
             var util = ServiceUtilFor(serviceName);
@@ -365,13 +377,13 @@ namespace services
             }
 
 
-            return UpdateServiceStateInList(mainView, serviceName, polling, state);
+            return UpdateServiceStateInList(mainView, serviceName, isIntermediateRefresh, state);
         }
 
         private static ServiceState UpdateServiceStateInList(
             MainView mainView,
             string serviceName,
-            bool isIntermediate,
+            bool isIntermediateRefresh,
             ServiceState state
         )
         {
@@ -393,7 +405,7 @@ namespace services
                 try
                 {
                     mainView.ServicesList.SetNeedsDisplay();
-                    var stringState = isIntermediate
+                    var stringState = isIntermediateRefresh
                         ? $"{state}*"
                         : $"{state}";
                     Trace.WriteLine($"Update status: {row} {serviceName} {state}");
@@ -461,10 +473,14 @@ namespace services
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.ErrorQuery(
-                        "Service control failed",
-                        ex.Message
-                    );
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        MessageBox.ErrorQuery(
+                            "Service control failed",
+                            ex.Message
+                        );
+                        RefreshServiceStatus(this, util.ServiceName, false);
+                    });
                 }
             });
         }
@@ -485,20 +501,33 @@ namespace services
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.ErrorQuery(
-                        "Service control failed",
-                        ex.Message
-                    );
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        MessageBox.ErrorQuery(
+                            "Service control failed",
+                            ex.Message,
+                            defaultButton: 0,
+                            "Ok"
+                        );
+                        RefreshServiceStatus(this, serviceName, false);
+                    });
                 }
             });
         }
 
         private void StartSelected()
         {
-            RunWithSelectedService(svc =>
-            {
-                DoStart(svc);
-            });
+            RunWithSelectedService(DoStart);
+        }
+
+        private void StopSelected()
+        {
+            RunWithSelectedService(DoStop);
+        }
+
+        private void RestartSelected()
+        {
+            RunWithSelectedService(DoRestart);
         }
 
         private void DoStart(IWindowsServiceUtil svc)
@@ -509,22 +538,6 @@ namespace services
                 svc.ServiceName,
                 ServiceState.Running
             );
-        }
-
-        private void StopSelected()
-        {
-            RunWithSelectedService(svc =>
-            {
-                DoStop(svc);
-            });
-        }
-
-        private void RestartSelected()
-        {
-            RunWithSelectedService(svc =>
-            {
-                DoRestart(svc);
-            });
         }
 
         private void DoStop(IWindowsServiceUtil svc)
@@ -729,6 +742,11 @@ namespace services
         private static string ServiceIdFor(DataRow row)
         {
             return (row[ID_COLUMN] as string)!;
+        }
+
+        private static string ServiceStateFor(DataRow row)
+        {
+            return (row[STATE_COLUMN] as string)!;
         }
     }
 }
