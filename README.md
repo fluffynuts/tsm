@@ -3,6 +3,8 @@ TSM - Terminal Service Manager
 
 A console-based service manager for windows
 
+![TSM Demonstration](tsm-demo.gif "A short demonstration - start, stop, restart, batch restart")
+
 why?
 ---
 
