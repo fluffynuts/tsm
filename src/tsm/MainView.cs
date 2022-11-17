@@ -297,8 +297,8 @@ namespace services
                 case ServiceState.StopPending:
                     break;
                 case ServiceState.Running:
-                    InsertRestart(mainView);
                     InsertStop(mainView);
+                    InsertRestart(mainView);
                     break;
                 case ServiceState.ContinuePending:
                     break;

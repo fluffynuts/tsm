@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PeanutButter.Utils" Version="3.0.88" />
-    <PackageReference Include="PeanutButter.WindowsServiceManagement" Version="3.0.88" />
+    <PackageReference Include="PeanutButter.Utils" Version="3.0.89" />
+    <PackageReference Include="PeanutButter.WindowsServiceManagement" Version="3.0.89" />
     <PackageReference Include="Terminal.Gui" Version="1.8.2" />
   </ItemGroup>
 
