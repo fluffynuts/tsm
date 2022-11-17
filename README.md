@@ -16,6 +16,10 @@ usage
 
 Fire it up & start changing service state. Type to filter.
 
+- `npm run build` to build
+- `npm run publish` to build as a single file in the `Publish` folder
+- `npm start` to quickly start up from within the repo
+
 known issues
 ---
 Status bar will render at the top of the screen (or appear hidden)
