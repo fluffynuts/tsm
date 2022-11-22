@@ -106,10 +106,11 @@ namespace services
 
         private void ApplyFilter(ustring? obj)
         {
+            Application.DoEvents();
             Application.MainLoop.Invoke(() =>
             {
                 ServicesList.SetNeedsDisplay();
-                var search = obj?.ToString().Split(" ", StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
+                var search = SearchBox.Text?.ToString()?.Split(" ", StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
                 lock (FilteredServices)
                 {
                     FilteredServices.Clear();
@@ -133,7 +134,6 @@ namespace services
                     }
                 }
 
-                Trace.WriteLine($"selected row: {ServicesList.SelectedRow}");
 
                 if (ServicesList.SelectedRow < 0)
                 {
