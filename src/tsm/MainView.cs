@@ -134,7 +134,6 @@ namespace services
                     }
                 }
 
-
                 if (ServicesList.SelectedRow < 0)
                 {
                     ServicesList.SelectedRow = 0;
@@ -309,6 +308,8 @@ namespace services
                 default:
                     throw new ArgumentOutOfRangeException();
             }
+
+            AppendUninstall(mainView);
         }
 
         private static void RefreshServiceStateUntilReached(
@@ -437,6 +438,16 @@ namespace services
             );
         }
 
+        private static void AppendUninstall(MainView mainView)
+        {
+            mainView.StatusBar.AddItemAt(
+                mainView.StatusBar.Items.Length,
+                new(
+                    Key.F12, "F12 Uninstall", mainView.UninstallSelected
+                )
+            );
+        }
+
         private static void InsertStart(MainView mainView)
         {
             mainView.StatusBar.AddItemAt(
@@ -525,9 +536,20 @@ namespace services
             RunWithSelectedService(DoStop);
         }
 
+        private void UninstallSelected()
+        {
+            RunWithSelectedService(DoUninstall);
+        }
+
         private void RestartSelected()
         {
             RunWithSelectedService(DoRestart);
+        }
+
+        private void DoUninstall(IWindowsServiceUtil svc)
+        {
+            svc.Uninstall();
+            Refresh(this);
         }
 
         private void DoStart(IWindowsServiceUtil svc)
