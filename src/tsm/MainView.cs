@@ -6,6 +6,7 @@ using PeanutButter.Utils;
 using PeanutButter.WindowsServiceManagement;
 using PeanutButter.WindowsServiceManagement.Exceptions;
 using Terminal.Gui;
+// ReSharper disable VirtualMemberCallInConstructor
 
 namespace services
 {
@@ -15,6 +16,7 @@ namespace services
         private const int NAME_COLUMN = 1;
         private const int STATE_COLUMN = 2;
         private const int AUTO_REFRESH_INTERVAL_MS = 100;
+        private const int BACKGROUND_REFRESH_INTERVAL_MS = 5000;
         public TableView ServicesList { get; set; }
         public ColorScheme GreenOnBlack { get; set; }
         public DataTable FilteredServices { get; set; }
@@ -66,17 +68,17 @@ namespace services
             {
                 Y = 0,
                 X = 8,
-                Width = Dim.Fill(0),
+                Width = Dim.Fill(),
                 ColorScheme = GreenOnBlack
             };
             SearchBox.TextChanged += ApplyFilter;
-            SearchBox.Enter += args => ServicesList?.SetFocus();
+            SearchBox.Enter += _ => ServicesList?.SetFocus();
             Add(SearchBox);
 
             ServicesList = new TableView()
             {
                 Y = 1,
-                Width = Dim.Fill(0),
+                Width = Dim.Fill(),
                 Height = Dim.Fill(1),
                 MultiSelect = true,
                 ColorScheme = GreenOnBlack,
@@ -91,6 +93,8 @@ namespace services
             };
             Add(ServicesList);
 
+            UiLock = new SemaphoreSlim(1);
+
 
             ClearStatusBar();
             Refresh(this);
@@ -98,8 +102,11 @@ namespace services
             ServicesList.SetFocus();
         }
 
+        public SemaphoreSlim UiLock { get; }
+
         protected override void Dispose(bool disposing)
         {
+            StopBackgroundRefresh();
             base.Dispose(disposing);
         }
 
@@ -108,6 +115,7 @@ namespace services
             Application.DoEvents();
             Application.MainLoop.Invoke(() =>
             {
+                using var _ = new AutoLocker(UiLock);
                 ServicesList.SetNeedsDisplay();
                 var search = SearchBox.Text?.ToString()?.Split(" ", StringSplitOptions.RemoveEmptyEntries) ??
                     Array.Empty<string>();
@@ -164,13 +172,13 @@ namespace services
             if (!string.IsNullOrWhiteSpace(SearchBox.Text.ToString()))
             {
                 StatusBar.AddItemAt(1,
-                    new(Key.F6, "F6 Start all", () => StartAll(this))
+                    new(Key.F6, "F6 Start all", StartAll)
                 );
                 StatusBar.AddItemAt(2,
-                    new(Key.F7, "F7 Restart all", () => RestartAll(this))
+                    new(Key.F7, "F7 Restart all", RestartAll)
                 );
                 StatusBar.AddItemAt(3,
-                    new(Key.F8, "F8 Stop all", () => StopAll(this))
+                    new(Key.F8, "F8 Stop all", StopAll)
                 );
             }
         }
@@ -180,7 +188,7 @@ namespace services
             return FilteredServiceIdToRowMap.Keys.ToArray();
         }
 
-        private void StartAll(MainView mainView)
+        private void StartAll()
         {
             var services = CurrentlyFilteredServices();
             foreach (var service in services)
@@ -197,7 +205,7 @@ namespace services
             }
         }
 
-        private void RestartAll(MainView mainView)
+        private void RestartAll()
         {
             var services = CurrentlyFilteredServices();
             foreach (var service in services)
@@ -206,7 +214,7 @@ namespace services
             }
         }
 
-        private void StopAll(MainView mainView)
+        private void StopAll()
         {
             var services = CurrentlyFilteredServices();
             foreach (var service in services)
@@ -245,7 +253,7 @@ namespace services
         {
             try
             {
-                DataRow? data = null;
+                DataRow? data;
                 lock (view.FilteredServices)
                 {
                     if (view.ServicesList.SelectedRow < 0 ||
@@ -374,6 +382,15 @@ namespace services
             var state = util.State;
             if (ServiceIdToRowMap.TryGetValue(serviceName, out var r))
             {
+                var current = $"{mainView.AllServices.Rows[r][STATE_COLUMN]}";
+                var update = $"{util.State}";
+                if (current == update)
+                {
+                    Trace.WriteLine($"{serviceName} still has state {update}");
+                    return util.State;
+                }
+
+
                 mainView.AllServices.Rows[r][STATE_COLUMN] = $"{state}";
             }
 
@@ -615,7 +632,7 @@ namespace services
         private void KeyPressHandler(KeyEventEventArgs keyEvent)
         {
             var key = keyEvent.KeyEvent.Key;
-            if (KeyHandlers.TryGetValue(key, out var handler))
+            if (_keyHandlers.TryGetValue(key, out var handler))
             {
                 handler(this);
                 keyEvent.Handled = handler(this);
@@ -638,7 +655,7 @@ namespace services
             keyEvent.Handled = false;
         }
 
-        private readonly Dictionary<Key, Func<MainView, bool>> KeyHandlers = new()
+        private readonly Dictionary<Key, Func<MainView, bool>> _keyHandlers = new()
         {
             [Key.Esc] = ClearSearch,
             [Key.Backspace] = BackspaceOnSearch,
@@ -698,14 +715,70 @@ namespace services
 
         private static readonly ConcurrentDictionary<string, IWindowsServiceUtil> Services = new();
         private KeyEventEventArgs? _lastKeyEvent;
+        private static CancellationTokenSource? _backgroundRefreshToken;
 
         private static void UpdateTitle(MainView view, string title)
         {
             view.Title = $"{title}    (ctrl-Q to quit)";
         }
 
+        private void StartBackgroundRefresh()
+        {
+            StopBackgroundRefresh();
+            _backgroundRefreshToken = new CancellationTokenSource();
+            var token = _backgroundRefreshToken.Token;
+            Task.Factory.StartNew(() =>
+            {
+                var scm = new ServiceControlInterface();
+                while (!token.IsCancellationRequested)
+                {
+                    Trace.WriteLine("Starting background refresh");
+                    var services = scm.ListAllServices();
+                    Parallel.ForEach(services, service =>
+                    {
+                        try
+                        {
+                            RefreshServiceStatus(this, service, false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Trace.WriteLine($"Unable to update service state for '{{service}}': {ex.Message}");
+                        }
+                    });
+                    Sleep(BACKGROUND_REFRESH_INTERVAL_MS, token);
+                }
+            }, token);
+        }
+
+
+        private void Sleep(int ms, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && ms > 0)
+            {
+                var toSleep = ms > AUTO_REFRESH_INTERVAL_MS
+                    ? AUTO_REFRESH_INTERVAL_MS
+                    : ms;
+                ms -= toSleep;
+                Thread.Sleep(toSleep);
+            }
+        }
+
+        private static void StopBackgroundRefresh()
+        {
+            try
+            {
+                _backgroundRefreshToken?.Cancel();
+                _backgroundRefreshToken = null;
+            }
+            catch
+            {
+                // suppress
+            }
+        }
+
         private static void Refresh(MainView mainView)
         {
+            using var _ = new AutoLocker(mainView.UiLock);
             mainView.AllServices.Clear();
             mainView.FilteredServices.Clear();
             UpdateTitle(mainView, "Services - Refreshing...");
@@ -732,6 +805,7 @@ namespace services
 
                 mainView.ApplyFilter(mainView.SearchBox.Text.ToString());
                 UpdateTitle(mainView, $"Services - Last refreshed: {DateTime.Now}");
+                mainView.StartBackgroundRefresh();
             });
         }
 
