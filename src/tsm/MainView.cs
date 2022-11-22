@@ -100,7 +100,6 @@ namespace services
 
         protected override void Dispose(bool disposing)
         {
-            _shutdownInitiated = true;
             base.Dispose(disposing);
         }
 
@@ -110,7 +109,8 @@ namespace services
             Application.MainLoop.Invoke(() =>
             {
                 ServicesList.SetNeedsDisplay();
-                var search = SearchBox.Text?.ToString()?.Split(" ", StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
+                var search = SearchBox.Text?.ToString()?.Split(" ", StringSplitOptions.RemoveEmptyEntries) ??
+                    Array.Empty<string>();
                 lock (FilteredServices)
                 {
                     FilteredServices.Clear();
@@ -488,7 +488,9 @@ namespace services
                     {
                         MessageBox.ErrorQuery(
                             "Service control failed",
-                            ex.Message
+                            ex.Message,
+                            defaultButton: 0,
+                            "Ok"
                         );
                         RefreshServiceStatus(this, util.ServiceName, false);
                     });
@@ -548,6 +550,21 @@ namespace services
 
         private void DoUninstall(IWindowsServiceUtil svc)
         {
+            int answer = 0;
+            Application.MainLoop.Invoke(() =>
+                answer = MessageBox.Query(
+                    "Confirm uninstall",
+                    $"You're about to uninstall '{svc.ServiceName}' ({svc.DisplayName})?",
+                    defaultButton: 1,
+                    "Ok",
+                    "Cancel"
+                )
+            );
+            if (answer == 1)
+            {
+                return;
+            }
+
             svc.Uninstall();
             Refresh(this);
         }
@@ -680,8 +697,7 @@ namespace services
         }
 
         private static readonly ConcurrentDictionary<string, IWindowsServiceUtil> Services = new();
-        private bool _shutdownInitiated;
-        private KeyEventEventArgs _lastKeyEvent;
+        private KeyEventEventArgs? _lastKeyEvent;
 
         private static void UpdateTitle(MainView view, string title)
         {
