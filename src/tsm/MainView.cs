@@ -110,9 +110,12 @@ namespace services
             base.Dispose(disposing);
         }
 
+        DateTime _deferBackgroundRefreshUntil = DateTime.MinValue;
+        
         private void ApplyFilter(ustring? obj)
         {
             Application.DoEvents();
+            _deferBackgroundRefreshUntil = DateTime.Now.AddSeconds(1);
             Application.MainLoop.Invoke(() =>
             {
                 using var _ = new AutoLocker(UiLock);
@@ -732,19 +735,23 @@ namespace services
                 var scm = new ServiceControlInterface();
                 while (!token.IsCancellationRequested)
                 {
-                    Trace.WriteLine("Starting background refresh");
-                    var services = scm.ListAllServices();
-                    Parallel.ForEach(services, service =>
+                    if (DateTime.Now > _deferBackgroundRefreshUntil)
                     {
-                        try
+                        Trace.WriteLine("Starting background refresh");
+                        var services = scm.ListAllServices();
+                        Parallel.ForEach(services, service =>
                         {
-                            RefreshServiceStatus(this, service, false);
-                        }
-                        catch (Exception ex)
-                        {
-                            Trace.WriteLine($"Unable to update service state for '{{service}}': {ex.Message}");
-                        }
-                    });
+                            try
+                            {
+                                RefreshServiceStatus(this, service, false);
+                            }
+                            catch (Exception ex)
+                            {
+                                Trace.WriteLine($"Unable to update service state for '{{service}}': {ex.Message}");
+                            }
+                        });
+                    }
+
                     Sleep(BACKGROUND_REFRESH_INTERVAL_MS, token);
                 }
             }, token);
