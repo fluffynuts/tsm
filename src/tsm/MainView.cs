@@ -2,10 +2,13 @@
 using System.Data;
 using System.Diagnostics;
 using NStack;
+using PeanutButter.INI;
 using PeanutButter.Utils;
 using PeanutButter.WindowsServiceManagement;
 using PeanutButter.WindowsServiceManagement.Exceptions;
 using Terminal.Gui;
+using Attribute = Terminal.Gui.Attribute;
+
 // ReSharper disable VirtualMemberCallInConstructor
 
 namespace services
@@ -18,7 +21,6 @@ namespace services
         private const int AUTO_REFRESH_INTERVAL_MS = 100;
         private const int BACKGROUND_REFRESH_INTERVAL_MS = 5000;
         public TableView ServicesList { get; set; }
-        public ColorScheme GreenOnBlack { get; set; }
         public DataTable FilteredServices { get; set; }
         public DataTable AllServices { get; set; }
         public Label SearchLabel { get; set; }
@@ -27,23 +29,158 @@ namespace services
         private static readonly ConcurrentDictionary<string, int> FilteredServiceIdToRowMap = new();
         private static readonly ConcurrentDictionary<string, int> ServiceIdToRowMap = new();
 
+        private static readonly ColorScheme DefaultColorScheme = new()
+        {
+            Normal = new Attribute(Color.Green, Color.Black),
+            HotNormal = new Attribute(Color.BrightGreen, Color.Black),
+            Focus = new Attribute(Color.White, Color.Black),
+            HotFocus = new Attribute(Color.BrightYellow, Color.Blue),
+            Disabled = new Attribute(Color.Gray, Color.Black)
+        };
+
+        private const string SECTION_DEFAULT_COLOR = "Color.Defaults";
+        private const string SECTION_STATE_COLOR = "Color.States";
+
+        private ColorScheme _runningScheme = DefaultColorScheme;
+        private ColorScheme _stoppedScheme = DefaultColorScheme;
+        private ColorScheme _pausedScheme = DefaultColorScheme;
+        private ColorScheme _pendingScheme = DefaultColorScheme;
+
+        private Color DefaultRunningColor = Color.BrightYellow;
+        private Color DefaultStoppedColor = Color.BrightRed;
+        private Color DefaultPausedColor = Color.Cyan;
+        private Color DefaultIntermediateColor = Color.DarkGray;
+
+
+        private void LoadColorScheme()
+        {
+            ColorScheme = DefaultColorScheme;
+            if (_config.HasSection(SECTION_DEFAULT_COLOR))
+            {
+                var section = _config.GetSection(SECTION_DEFAULT_COLOR);
+                ColorScheme = new()
+                {
+                    Normal = MakeAttribute(section, nameof(ColorScheme.Normal), DefaultColorScheme.Normal),
+                    HotNormal = MakeAttribute(section, nameof(ColorScheme.HotNormal), DefaultColorScheme.HotNormal),
+                    Focus = MakeAttribute(section, nameof(ColorScheme.Focus), DefaultColorScheme.Focus),
+                    HotFocus = MakeAttribute(section, nameof(ColorScheme.HotFocus), DefaultColorScheme.Focus),
+                    Disabled = MakeAttribute(section, nameof(ColorScheme.Disabled), DefaultColorScheme.Disabled)
+                };
+            }
+
+            var defaultBackground = DefaultColorScheme.Normal.Background;
+            _runningScheme = MakeScheme(DefaultRunningColor, defaultBackground);
+            _stoppedScheme = MakeScheme(DefaultStoppedColor, defaultBackground);
+            _pausedScheme = MakeScheme(DefaultPausedColor, defaultBackground);
+            _pendingScheme = MakeScheme(DefaultIntermediateColor, defaultBackground);
+
+
+            if (_config.HasSection(SECTION_STATE_COLOR))
+            {
+                var runningColor =
+                    _config.GetValue(SECTION_STATE_COLOR, $"{ServiceState.Running}", $"{Color.BrightGreen}");
+                var stoppedColor =
+                    _config.GetValue(SECTION_STATE_COLOR, $"{ServiceState.Stopped}", $"{Color.BrightRed}");
+                var pausedColor = _config.GetValue(SECTION_STATE_COLOR, $"{ServiceState.Paused}", $"{Color.Cyan}");
+                var pendingColor = _config.GetValue(SECTION_STATE_COLOR, "pending", $"{Color.DarkGray}");
+
+                _runningScheme = MakeScheme(runningColor, defaultBackground);
+                _stoppedScheme = MakeScheme(stoppedColor, defaultBackground);
+                _pausedScheme = MakeScheme(pausedColor, defaultBackground);
+                _pendingScheme = MakeScheme(pendingColor, defaultBackground);
+            }
+        }
+
+        private Attribute MakeAttribute(
+            IDictionary<string, string> section,
+            string group,
+            Attribute defaults
+        )
+        {
+            var fg = section.TryGetValue($"{group}.fg", out var userFg) &&
+                Enum.TryParse<Color>(userFg, out var fgColor)
+                    ? fgColor
+                    : defaults.Foreground;
+            var bg = section.TryGetValue($"{group}.bg", out var userBg) &&
+                Enum.TryParse<Color>(userBg, out var bgColor)
+                    ? bgColor
+                    : defaults.Background;
+            return new Attribute(fg, bg);
+        }
+
+        private ColorScheme MakeScheme(
+            string foreground,
+            Color background
+        )
+        {
+            if (!Enum.TryParse<Color>(foreground, out var fgColor))
+            {
+                return DefaultColorScheme;
+            }
+
+            return MakeScheme(fgColor, background);
+        }
+
+        private static ColorScheme MakeScheme(
+            Color foreground,
+            Color background
+        )
+        {
+            return new ColorScheme()
+            {
+                Normal = new Attribute(foreground, background),
+                HotNormal = new Attribute(foreground, background),
+                Focus = new Attribute(foreground, background),
+                HotFocus = new Attribute(foreground, background),
+                Disabled = new Attribute(foreground, background)
+            };
+        }
+
+        private IINIFile LoadConfig()
+        {
+            if (IniFilePath is null)
+            {
+                return new INIFile();
+            }
+
+            _isFirstRun = !File.Exists(IniFilePath);
+            return new INIFile(IniFilePath);
+        }
+
+        private string? IniFilePath
+        {
+            get
+            {
+                if (_iniFilePath is not null)
+                {
+                    return _iniFilePath;
+                }
+
+                var userProfileFolder = Environment.GetEnvironmentVariable("USERPROFILE");
+                if (userProfileFolder is null)
+                {
+                    return null;
+                }
+
+                return _iniFilePath ??= Path.Combine(userProfileFolder, "tsm.ini");
+            }
+        }
+
+        private string? _iniFilePath;
+
+        private readonly IINIFile _config;
 
         public MainView(Toplevel top)
         {
-            GreenOnBlack = new ColorScheme
-            {
-                Normal = new Terminal.Gui.Attribute(Color.Green, Color.Black),
-                HotNormal = new Terminal.Gui.Attribute(Color.BrightGreen, Color.Black),
-                Focus = new Terminal.Gui.Attribute(Color.Green, Color.Magenta),
-                HotFocus = new Terminal.Gui.Attribute(Color.BrightGreen, Color.Magenta),
-                Disabled = new Terminal.Gui.Attribute(Color.Gray, Color.Black)
-            };
-            ColorScheme = GreenOnBlack;
+            _config = LoadConfig();
+            LoadColorScheme();
+            PersistConfig();
 
             FilteredServices = new DataTable();
+            _stateDataColumn = new DataColumn() { ColumnName = "State" };
             FilteredServices.Columns.Add(new DataColumn() { ColumnName = "Id" });
             FilteredServices.Columns.Add(new DataColumn() { ColumnName = "Name" });
-            FilteredServices.Columns.Add(new DataColumn() { ColumnName = "State" });
+            FilteredServices.Columns.Add(_stateDataColumn);
             AllServices = new DataTable();
             AllServices.Columns.Add(new DataColumn() { ColumnName = "Id" });
             AllServices.Columns.Add(new DataColumn() { ColumnName = "Name" });
@@ -69,7 +206,6 @@ namespace services
                 Y = 0,
                 X = 8,
                 Width = Dim.Fill(),
-                ColorScheme = GreenOnBlack
             };
             SearchBox.TextChanged += ApplyFilter;
             SearchBox.Enter += _ => ServicesList?.SetFocus();
@@ -81,7 +217,6 @@ namespace services
                 Width = Dim.Fill(),
                 Height = Dim.Fill(1),
                 MultiSelect = true,
-                ColorScheme = GreenOnBlack,
                 FullRowSelect = true,
                 Table = FilteredServices,
                 Style =
@@ -89,17 +224,82 @@ namespace services
                     AlwaysShowHeaders = true,
                     ShowVerticalCellLines = true,
                     ShowVerticalHeaderLines = true,
+                    ColumnStyles = new Dictionary<DataColumn, TableView.ColumnStyle>()
+                    {
+                        [_stateDataColumn] = new()
+                        {
+                            ColorGetter = StateColumnColorGetter,
+                        }
+                    }
                 }
             };
             Add(ServicesList);
-
             UiLock = new SemaphoreSlim(1);
-
-
             ClearStatusBar();
             Refresh(this);
             ServicesList.KeyDown += KeyPressHandler;
             ServicesList.SetFocus();
+        }
+
+        private void PersistConfig()
+        {
+            if (IniFilePath is null)
+            {
+                return;
+            }
+
+            // always rewrite the file, in case new settings are added - then it's
+            // easy for the user to re-configure
+            if (!_config.HasSection(SECTION_DEFAULT_COLOR))
+            {
+                _config.AddSection(SECTION_DEFAULT_COLOR);
+            }
+
+            var section = _config.GetSection(SECTION_DEFAULT_COLOR);
+            section[$"{nameof(ColorScheme.Normal)}.fg"] = $"{ColorScheme.Normal.Foreground}";
+            section[$"{nameof(ColorScheme.Normal)}.bg"] = $"{ColorScheme.Normal.Background}";
+            section[$"{nameof(ColorScheme.HotNormal)}.fg"] = $"{ColorScheme.HotNormal.Foreground}";
+            section[$"{nameof(ColorScheme.HotNormal)}.bg"] = $"{ColorScheme.HotNormal.Background}";
+            section[$"{nameof(ColorScheme.Focus)}.fg"] = $"{ColorScheme.Focus.Foreground}";
+            section[$"{nameof(ColorScheme.Focus)}.bg"] = $"{ColorScheme.Focus.Background}";
+            section[$"{nameof(ColorScheme.HotFocus)}.fg"] = $"{ColorScheme.HotFocus.Foreground}";
+            section[$"{nameof(ColorScheme.HotFocus)}.bg"] = $"{ColorScheme.HotFocus.Background}";
+            section[$"{nameof(ColorScheme.Disabled)}.fg"] = $"{ColorScheme.Disabled.Foreground}";
+            section[$"{nameof(ColorScheme.Disabled)}.bg"] = $"{ColorScheme.Disabled.Background}";
+
+            if (!_config.HasSection(SECTION_STATE_COLOR))
+            {
+                _config.AddSection(SECTION_STATE_COLOR);
+            }
+
+            section = _config.GetSection(SECTION_STATE_COLOR);
+            section[$"{ServiceState.Running}"] = $"{_runningScheme.Normal.Foreground}";
+            section[$"{ServiceState.Paused}"] = $"{_pausedScheme.Normal.Foreground}";
+            section[$"{ServiceState.Stopped}"] = $"{_stoppedScheme.Normal.Foreground}";
+            section["pending"] = $"{_pendingScheme.Normal.Foreground}";
+
+            _config.Persist();
+        }
+
+        private ColorScheme StateColumnColorGetter(TableView.CellColorGetterArgs args)
+        {
+            var cellValue = $"{args.CellValue}";
+            if (cellValue.Contains("Pend") || cellValue.Contains("*"))
+            {
+                return _pendingScheme;
+            }
+
+            switch (args.CellValue)
+            {
+                case "Stopped":
+                    return _stoppedScheme;
+                case "Running":
+                    return _runningScheme;
+                case "Paused":
+                    return _pausedScheme;
+            }
+
+            return DefaultColorScheme;
         }
 
         public SemaphoreSlim UiLock { get; }
@@ -111,7 +311,7 @@ namespace services
         }
 
         DateTime _deferBackgroundRefreshUntil = DateTime.MinValue;
-        
+
         private void ApplyFilter(ustring? obj)
         {
             Application.DoEvents();
@@ -719,6 +919,8 @@ namespace services
         private static readonly ConcurrentDictionary<string, IWindowsServiceUtil> Services = new();
         private KeyEventEventArgs? _lastKeyEvent;
         private static CancellationTokenSource? _backgroundRefreshToken;
+        private readonly DataColumn _stateDataColumn;
+        private bool _isFirstRun;
 
         private static void UpdateTitle(MainView view, string title)
         {
