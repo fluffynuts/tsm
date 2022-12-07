@@ -634,23 +634,30 @@ namespace services
                 return ServiceState.Unknown;
             }
 
-            var state = util.State;
-            if (ServiceIdToRowMap.TryGetValue(serviceName, out var r))
+            try
             {
-                var current = $"{mainView.AllServices.Rows[r][STATE_COLUMN]}";
-                var update = $"{util.State}";
-                if (current == update)
+                var state = util.State;
+                if (ServiceIdToRowMap.TryGetValue(serviceName, out var r))
                 {
-                    Trace.WriteLine($"{serviceName} still has state {update}");
-                    return util.State;
+                    var current = $"{mainView.AllServices.Rows[r][STATE_COLUMN]}";
+                    var update = $"{util.State}";
+                    if (current == update)
+                    {
+                        Trace.WriteLine($"{serviceName} still has state {update}");
+                        return util.State;
+                    }
+
+
+                    mainView.AllServices.Rows[r][STATE_COLUMN] = $"{state}";
                 }
 
 
-                mainView.AllServices.Rows[r][STATE_COLUMN] = $"{state}";
+                return UpdateServiceStateInList(mainView, serviceName, isIntermediateRefresh, state);
             }
-
-
-            return UpdateServiceStateInList(mainView, serviceName, isIntermediateRefresh, state);
+            catch
+            {
+                return util.State;
+            }
         }
 
         private static ServiceState UpdateServiceStateInList(
@@ -786,7 +793,10 @@ namespace services
             );
         }
 
-        public void RunWithSelectedService(Action<IWindowsServiceUtil> toRun)
+        public void RunWithSelectedService(
+            Action<IWindowsServiceUtil> toRun,
+            bool alreadyOnMainLoop = false
+        )
         {
             Task.Run(() =>
             {
@@ -802,6 +812,12 @@ namespace services
                 }
                 catch (Exception ex)
                 {
+                    if (alreadyOnMainLoop)
+                    {
+                        // caller should take care of this
+                        throw;
+                    }
+
                     Application.MainLoop.Invoke(() =>
                     {
                         MessageBox.ErrorQuery(
@@ -858,7 +874,7 @@ namespace services
 
         private void UninstallSelected()
         {
-            RunWithSelectedService(DoUninstall);
+            RunWithSelectedService(DoUninstall, alreadyOnMainLoop: true);
         }
 
         private void RestartSelected()
@@ -883,7 +899,24 @@ namespace services
                     return;
                 }
 
-                svc.Uninstall();
+                try
+                {
+                    svc.Uninstall();
+                }
+                catch (Exception ex)
+                {
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        MessageBox.ErrorQuery(
+                            "Unable to uninstall service",
+                            ex.Message,
+                            defaultButton: 0,
+                            "Ok"
+                        );
+                        RefreshServiceStatus(this, svc.ServiceName, false);
+                    });
+                }
+
                 Refresh(this);
             });
         }
