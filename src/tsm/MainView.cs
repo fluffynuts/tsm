@@ -772,21 +772,22 @@ namespace services
         {
             int answer = 0;
             Application.MainLoop.Invoke(() =>
+            {
                 answer = MessageBox.Query(
                     "Confirm uninstall",
                     $"You're about to uninstall '{svc.ServiceName}' ({svc.DisplayName})?",
                     defaultButton: 1,
                     "Ok",
                     "Cancel"
-                )
-            );
-            if (answer == 1)
-            {
-                return;
-            }
+                );
+                if (answer == 1)
+                {
+                    return;
+                }
 
-            svc.Uninstall();
-            Refresh(this);
+                svc.Uninstall();
+                Refresh(this);
+            });
         }
 
         private void DoStart(IWindowsServiceUtil svc)
