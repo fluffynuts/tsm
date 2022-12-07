@@ -38,7 +38,17 @@ namespace services
             Disabled = new Attribute(Color.Gray, Color.Black)
         };
 
+        private static readonly ColorScheme DefaultStatusBarColorScheme = new()
+        {
+            Normal = new Attribute(Color.DarkGray, Color.Black),
+            HotNormal = new Attribute(Color.BrightGreen, Color.Black),
+            Focus = new Attribute(Color.White, Color.Black),
+            HotFocus = new Attribute(Color.BrightYellow, Color.Blue),
+            Disabled = new Attribute(Color.DarkGray, Color.Black)
+        };
+
         private const string SECTION_DEFAULT_COLOR = "Color.Defaults";
+        private const string SECTION_STATUSBAR_COLOR = "Color.StatusBar";
         private const string SECTION_STATE_COLOR = "Color.States";
 
         private ColorScheme _runningScheme = DefaultColorScheme;
@@ -51,6 +61,7 @@ namespace services
         private Color DefaultPausedColor = Color.Cyan;
         private Color DefaultIntermediateColor = Color.DarkGray;
 
+        private ColorScheme _statusBarColorScheme = DefaultStatusBarColorScheme;
 
         private void LoadColorScheme()
         {
@@ -65,6 +76,21 @@ namespace services
                     Focus = MakeAttribute(section, nameof(ColorScheme.Focus), DefaultColorScheme.Focus),
                     HotFocus = MakeAttribute(section, nameof(ColorScheme.HotFocus), DefaultColorScheme.Focus),
                     Disabled = MakeAttribute(section, nameof(ColorScheme.Disabled), DefaultColorScheme.Disabled)
+                };
+            }
+
+            if (_config.HasSection(SECTION_STATUSBAR_COLOR))
+            {
+                var section = _config.GetSection(SECTION_STATUSBAR_COLOR);
+                _statusBarColorScheme = new()
+                {
+                    Normal = MakeAttribute(section, nameof(ColorScheme.Normal), DefaultStatusBarColorScheme.Normal),
+                    HotNormal = MakeAttribute(section, nameof(ColorScheme.HotNormal),
+                        DefaultStatusBarColorScheme.HotNormal),
+                    Focus = MakeAttribute(section, nameof(ColorScheme.Focus), DefaultStatusBarColorScheme.Focus),
+                    HotFocus = MakeAttribute(section, nameof(ColorScheme.HotFocus), DefaultStatusBarColorScheme.Focus),
+                    Disabled = MakeAttribute(section, nameof(ColorScheme.Disabled),
+                        DefaultStatusBarColorScheme.Disabled)
                 };
             }
 
@@ -190,7 +216,8 @@ namespace services
             StatusBar = new StatusBar()
             {
                 Y = Pos.Bottom(top),
-                Width = Dim.Percent(100)
+                Width = Dim.Percent(100),
+                ColorScheme = _statusBarColorScheme
             };
             top.Add(StatusBar);
             SearchLabel = new Label()
@@ -250,35 +277,44 @@ namespace services
 
             // always rewrite the file, in case new settings are added - then it's
             // easy for the user to re-configure
-            if (!_config.HasSection(SECTION_DEFAULT_COLOR))
-            {
-                _config.AddSection(SECTION_DEFAULT_COLOR);
-            }
+            StoreColorScheme(SECTION_DEFAULT_COLOR, ColorScheme);
+            StoreColorScheme(SECTION_STATUSBAR_COLOR, _statusBarColorScheme);
 
-            var section = _config.GetSection(SECTION_DEFAULT_COLOR);
-            section[$"{nameof(ColorScheme.Normal)}.fg"] = $"{ColorScheme.Normal.Foreground}";
-            section[$"{nameof(ColorScheme.Normal)}.bg"] = $"{ColorScheme.Normal.Background}";
-            section[$"{nameof(ColorScheme.HotNormal)}.fg"] = $"{ColorScheme.HotNormal.Foreground}";
-            section[$"{nameof(ColorScheme.HotNormal)}.bg"] = $"{ColorScheme.HotNormal.Background}";
-            section[$"{nameof(ColorScheme.Focus)}.fg"] = $"{ColorScheme.Focus.Foreground}";
-            section[$"{nameof(ColorScheme.Focus)}.bg"] = $"{ColorScheme.Focus.Background}";
-            section[$"{nameof(ColorScheme.HotFocus)}.fg"] = $"{ColorScheme.HotFocus.Foreground}";
-            section[$"{nameof(ColorScheme.HotFocus)}.bg"] = $"{ColorScheme.HotFocus.Background}";
-            section[$"{nameof(ColorScheme.Disabled)}.fg"] = $"{ColorScheme.Disabled.Foreground}";
-            section[$"{nameof(ColorScheme.Disabled)}.bg"] = $"{ColorScheme.Disabled.Background}";
-
-            if (!_config.HasSection(SECTION_STATE_COLOR))
-            {
-                _config.AddSection(SECTION_STATE_COLOR);
-            }
-
-            section = _config.GetSection(SECTION_STATE_COLOR);
+            var section = _config.GetSection(SECTION_STATE_COLOR);
             section[$"{ServiceState.Running}"] = $"{_runningScheme.Normal.Foreground}";
             section[$"{ServiceState.Paused}"] = $"{_pausedScheme.Normal.Foreground}";
             section[$"{ServiceState.Stopped}"] = $"{_stoppedScheme.Normal.Foreground}";
             section["pending"] = $"{_pendingScheme.Normal.Foreground}";
 
+            if (!_config.HasSection(SECTION_STATUSBAR_COLOR))
+            {
+                _config.AddSection(SECTION_STATUSBAR_COLOR);
+            }
+
             _config.Persist();
+        }
+
+        private void StoreColorScheme(
+            string sectionName,
+            ColorScheme colorScheme
+        )
+        {
+            if (!_config.HasSection(sectionName))
+            {
+                _config.AddSection(sectionName);
+            }
+
+            var section = _config.GetSection(sectionName);
+            section[$"{nameof(colorScheme.Normal)}.fg"] = $"{colorScheme.Normal.Foreground}";
+            section[$"{nameof(colorScheme.Normal)}.bg"] = $"{colorScheme.Normal.Background}";
+            section[$"{nameof(colorScheme.HotNormal)}.fg"] = $"{colorScheme.HotNormal.Foreground}";
+            section[$"{nameof(colorScheme.HotNormal)}.bg"] = $"{colorScheme.HotNormal.Background}";
+            section[$"{nameof(colorScheme.Focus)}.fg"] = $"{colorScheme.Focus.Foreground}";
+            section[$"{nameof(colorScheme.Focus)}.bg"] = $"{colorScheme.Focus.Background}";
+            section[$"{nameof(colorScheme.HotFocus)}.fg"] = $"{colorScheme.HotFocus.Foreground}";
+            section[$"{nameof(colorScheme.HotFocus)}.bg"] = $"{colorScheme.HotFocus.Background}";
+            section[$"{nameof(colorScheme.Disabled)}.fg"] = $"{colorScheme.Disabled.Foreground}";
+            section[$"{nameof(colorScheme.Disabled)}.bg"] = $"{colorScheme.Disabled.Background}";
         }
 
         private ColorScheme StateColumnColorGetter(TableView.CellColorGetterArgs args)
@@ -370,18 +406,30 @@ namespace services
         {
             ClearStatusBar();
             StatusBar.AddItemAt(0,
-                new(Key.F5, "F5 Refresh", () => Refresh(this))
+                new(Key.F5, "~F5 Refresh~", () => Refresh(this))
             );
-            if (!string.IsNullOrWhiteSpace(SearchBox.Text.ToString()))
+            if (string.IsNullOrWhiteSpace(SearchBox.Text.ToString()))
             {
                 StatusBar.AddItemAt(1,
-                    new(Key.F6, "F6 Start all", StartAll)
+                    new(Key.F6, "F6 Start all", RequiresFilter)
                 );
                 StatusBar.AddItemAt(2,
-                    new(Key.F7, "F7 Restart all", RestartAll)
+                    new(Key.F7, "F7 Restart all", RequiresFilter)
                 );
                 StatusBar.AddItemAt(3,
-                    new(Key.F8, "F8 Stop all", StopAll)
+                    new(Key.F8, "F8 Stop all", RequiresFilter)
+                );
+            }
+            else
+            {
+                StatusBar.AddItemAt(1,
+                    new(Key.F6, "~F6 Start all~", StartAll)
+                );
+                StatusBar.AddItemAt(2,
+                    new(Key.F7, "~F7 Restart all~", RestartAll)
+                );
+                StatusBar.AddItemAt(3,
+                    new(Key.F8, "~F8 Stop all~", StopAll)
                 );
             }
         }
@@ -500,21 +548,25 @@ namespace services
                 case ServiceState.NotFound:
                     break;
                 case ServiceState.Stopped:
-                    InsertStart(mainView);
-                    break;
-                case ServiceState.StartPending:
-                    break;
-                case ServiceState.StopPending:
-                    break;
-                case ServiceState.Running:
-                    InsertStop(mainView);
-                    InsertRestart(mainView);
-                    break;
-                case ServiceState.ContinuePending:
-                    break;
-                case ServiceState.PausePending:
+                    InsertStop(mainView, disabled: true);
+                    InsertRestart(mainView, disabled: true);
+                    InsertStart(mainView, disabled: false);
                     break;
                 case ServiceState.Paused:
+                    // TODO: insert continue
+                    break;
+                case ServiceState.ContinuePending:
+                case ServiceState.PausePending:
+                case ServiceState.StartPending:
+                case ServiceState.StopPending:
+                    InsertStop(mainView, disabled: true);
+                    InsertRestart(mainView, disabled: true);
+                    InsertStart(mainView, disabled: true);
+                    break;
+                case ServiceState.Running:
+                    InsertStop(mainView, disabled: false);
+                    InsertRestart(mainView, disabled: false);
+                    InsertStart(mainView, disabled: true);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -648,13 +700,14 @@ namespace services
         }
 
 
-        private static void InsertStop(MainView mainView)
+        private static void InsertStop(MainView mainView, bool disabled)
         {
-            mainView.StatusBar.AddItemAt(
-                0,
-                new(
-                    Key.F3, "F3 Stop", mainView.StopSelected
-                )
+            InsertStatusBarItem(
+                mainView,
+                Key.F3,
+                "Stop",
+                mainView.StopSelected,
+                disabled
             );
         }
 
@@ -663,28 +716,73 @@ namespace services
             mainView.StatusBar.AddItemAt(
                 mainView.StatusBar.Items.Length,
                 new(
-                    Key.F12, "F12 Uninstall", mainView.UninstallSelected
+                    Key.F12, "~F12 Uninstall~", mainView.UninstallSelected
                 )
             );
         }
 
-        private static void InsertStart(MainView mainView)
+        private static void InsertStart(MainView mainView, bool disabled)
         {
-            mainView.StatusBar.AddItemAt(
-                0,
-                new(
-                    Key.F1, "F1 Start", mainView.StartSelected
-                )
+            InsertStatusBarItem(
+                mainView,
+                Key.F1,
+                "Start",
+                mainView.StartSelected,
+                disabled
             );
         }
 
-        private static void InsertRestart(MainView mainView)
+        private static void DisabledAction()
         {
+            // for statusbar items which are disabled
+        }
+
+        private void RequiresFilter()
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                MessageBox.Query(
+                    "Please filter first",
+                    "Bulk actions can only be performed after filtering",
+                    defaultButton: 0,
+                    "Ok"
+                );
+            });
+        }
+
+        private static void InsertRestart(MainView mainView, bool disabled)
+        {
+            InsertStatusBarItem(
+                mainView,
+                Key.F2,
+                "Restart",
+                mainView.RestartSelected,
+                disabled
+            );
+        }
+
+        private static void InsertStatusBarItem(
+            MainView mainView,
+            Key key,
+            string text,
+            Action action,
+            bool disabled
+        )
+        {
+            text = $"{key} {text}";
+            if (disabled)
+            {
+                action = DisabledAction;
+            }
+            else
+            {
+                // take on the "hot" color
+                text = $"~{text}~";
+            }
+
             mainView.StatusBar.AddItemAt(
                 0,
-                new(
-                    Key.F2, "F2 Restart", mainView.RestartSelected
-                )
+                new(key, text, action)
             );
         }
 
